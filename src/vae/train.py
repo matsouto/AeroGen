@@ -28,8 +28,12 @@ from src.airfoil import airfoil_modifications
 # ============================================================================
 # Fixed seed for reproducibility across all random operations
 SEED = 42
+
 # Number of validation airfoils to visualize during training
 AIRFOILS_TO_PLOT = 9
+
+# Development mode flag (set to False for full training with WandB logging)
+DEV = True 
 
 # Set seeds for all libraries to ensure reproducibility
 tf.random.set_seed(SEED)
@@ -40,7 +44,7 @@ random.seed(SEED)
 # HYPERPARAMETERS
 # ============================================================================
 # Training configuration
-EPOCHS = 10  # Number of training epochs
+EPOCHS = 30  # Number of training epochs
 BATCH_SIZE = 32  # Batch size for training
 LATENT_DIM = 16  # Dimensionality of the latent space
 NPV = 12  # Number of CST coefficients per surface (MUST match dataset generation)
@@ -65,9 +69,9 @@ PROJECT_PATH = "./"  # Project root directory
 # DATASET LOADING AND PREPARATION
 # ============================================================================
 # Load the Kulfan parameter dataset
-dataset_path = Path(PROJECT_PATH) / "data" / "processed" / "kulfan_dataset_75.json"
+train_dataset_path = Path(PROJECT_PATH) / "data" / "processed" / "train_kulfan_dataset_75.json"
 print("Loading dataset...")
-airfoil_dataset = pd.read_json(dataset_path)
+airfoil_dataset = pd.read_json(train_dataset_path)
 
 # Convert coordinate strings to numpy arrays
 airfoil_dataset["coordinates"] = airfoil_dataset["coordinates"].apply(lambda coords: np.array(coords))
@@ -109,14 +113,22 @@ print(
 # ============================================================================
 # VALIDATION AIRFOILS PREPARATION
 # ============================================================================
+
+validation_dataset_path = Path(PROJECT_PATH) / "data" / "processed" / "val_kulfan_dataset_75.json"
+print("Loading dataset...")
+validation_airfoil_dataset = pd.read_json(validation_dataset_path)
+
+# Convert coordinate strings to numpy arrays
+validation_airfoil_dataset["coordinates"] = validation_airfoil_dataset["coordinates"].apply(lambda coords: np.array(coords))
+
 # Select first N airfoils for validation visualization during training
-validation_airfoils_df = airfoil_dataset.iloc[:AIRFOILS_TO_PLOT].reset_index(drop=True)
+validation_airfoils_sample = validation_airfoil_dataset.iloc[:AIRFOILS_TO_PLOT].reset_index(drop=True)
 # Create Airfoil objects for plotting reference
 validation_airfoils = [Airfoil(coordinates=af["coordinates"], name=af["airfoil_name"]) 
-                       for af in validation_airfoils_df.to_dict(orient="records")]
+                       for af in validation_airfoils_sample.to_dict(orient="records")]
 
 # Extract Kulfan parameters from validation airfoils
-validation_input = validation_airfoils_df["kulfan_parameters"].apply(
+validation_input = validation_airfoils_sample["kulfan_parameters"].apply(
   lambda p: np.concatenate([
     p["lower_weights"],  # Lower surface weights
     p["upper_weights"],  # Upper surface weights
@@ -199,12 +211,13 @@ def train_step(data, beta):
 # WEIGHTS & BIASES INITIALIZATION
 # ============================================================================
 # Initialize WandB for experiment tracking and logging
-wandb.init(
-    project="CSTVAE",
-    config=HYPERPARAMETERS,
-    name=f"VAE_{time.strftime('%Y%m%d-%H%M%S')}",  # Unique run name with timestamp
-    notes="Dense Arch + Linear Output + Sum Loss + Scaler"
-)
+if not DEV:
+    wandb.init(
+        project="CSTVAE",
+        config=HYPERPARAMETERS,
+        name=f"VAE_{time.strftime('%Y%m%d-%H%M%S')}",  # Unique run name with timestamp
+        notes="Dense Arch + Linear Output + Sum Loss + Scaler"
+    )
 
 # Verbosity level for training output
 VERBOSE = 1  # 0: silent, 1: print epoch info
@@ -237,8 +250,6 @@ for epoch in range(EPOCHS):
     else:
         BETA = TARGET_BETA
     
-    wandb.log({'beta': BETA})
-
     # Train on all batches for this epoch
     for x_batch in tqdm(train_dataset, desc=f"Epoch {epoch+1}/{EPOCHS}"):
         # Run one training step and get losses
@@ -260,11 +271,13 @@ for epoch in range(EPOCHS):
               f"KL Loss: {epoch_kl_loss.result():.4f}")
     
     # Log metrics to WandB for monitoring
-    wandb.log({
-        'epoch_total_loss': epoch_total_loss.result(),
-        'epoch_reconstruction_loss': epoch_reco_loss.result(),
-        'epoch_kl_loss': epoch_kl_loss.result(),
-    })
+    if not DEV:
+        wandb.log({'beta': BETA})
+        wandb.log({
+            'epoch_total_loss': epoch_total_loss.result(),
+            'epoch_reconstruction_loss': epoch_reco_loss.result(),
+            'epoch_kl_loss': epoch_kl_loss.result(),
+        })
 
     # Validation and visualization: run inference on validation set
     val_input_tensor = tf.convert_to_tensor(validation_input)
