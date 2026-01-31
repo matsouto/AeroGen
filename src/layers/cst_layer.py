@@ -29,12 +29,12 @@ class CSTLayer(Layer):
         num_weights = tf.shape(inputs)[2]
 
         # Split into lower and upper weights
-        lower_weights = inputs[:, 0, :]  # Shape: (batch_size, num_weights)
-        upper_weights = inputs[:, 1, :]  # Shape: (batch_size, num_weights)
+        upper_weights = inputs[:, 0, :]  # Shape: (batch_size, num_weights)
+        lower_weights = inputs[:, 1, :]  # Shape: (batch_size, num_weights)
 
         # Extract batch-specific parameters
-        leading_edge_weight = parameters[:, 0]  # Shape: (batch_size,)
-        TE_thickness = parameters[:, 1]  # Shape: (batch_size,)
+        TE_thickness = parameters[:, 0]  # Shape: (batch_size,)
+        leading_edge_weight = parameters[:, 1]  # Shape: (batch_size,)
 
         # Generate cosinically spaced points
         x = (
