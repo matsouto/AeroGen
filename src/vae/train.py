@@ -4,6 +4,8 @@
 import os
 import sys
 import random
+import joblib
+
 from pathlib import Path
 from aerosandbox import Airfoil, KulfanAirfoil
 
@@ -26,14 +28,12 @@ from src.airfoil import airfoil_modifications
 # ============================================================================
 # CONFIGURATION AND RANDOM SEEDS
 # ============================================================================
-# Fixed seed for reproducibility across all random operations
-SEED = 42
 
-# Number of validation airfoils to visualize during training
-AIRFOILS_TO_PLOT = 9
-
-# Development mode flag (set to False for full training with WandB logging)
-DEV = True 
+SEED = 42 # Fixed seed for reproducibility across all random operations
+AIRFOILS_TO_PLOT = 9 # Number of validation airfoils to visualize during training
+CHECKPOINT_EPOCHS = 10  # Save model and visualization every N epochs
+VERBOSE = 1  # 0: silent, 1: print epoch info
+DEV = False # Development mode flag (set to False for full training with WandB logging)
 
 # Set seeds for all libraries to ensure reproducibility
 tf.random.set_seed(SEED)
@@ -43,8 +43,8 @@ random.seed(SEED)
 # ============================================================================
 # HYPERPARAMETERS
 # ============================================================================
-# Training configuration
-EPOCHS = 30  # Number of training epochs
+
+EPOCHS = 500  # Number of training epochs
 BATCH_SIZE = 32  # Batch size for training
 LATENT_DIM = 16  # Dimensionality of the latent space
 NPV = 12  # Number of CST coefficients per surface (MUST match dataset generation)
@@ -70,8 +70,11 @@ PROJECT_PATH = "./"  # Project root directory
 # ============================================================================
 # Load the Kulfan parameter dataset
 train_dataset_path = Path(PROJECT_PATH) / "data" / "processed" / "train_kulfan_dataset_75.json"
-print("Loading dataset...")
+print("\n" + "="*70)
+print("LOADING TRAINING DATASET")
+print("="*70)
 airfoil_dataset = pd.read_json(train_dataset_path)
+print(f"✓ Loaded {len(airfoil_dataset)} training samples")
 
 # Convert coordinate strings to numpy arrays
 airfoil_dataset["coordinates"] = airfoil_dataset["coordinates"].apply(lambda coords: np.array(coords))
@@ -92,12 +95,15 @@ airfoil_data = np.stack(airfoil_data, axis=0).astype(np.float32)
 # Split weights and parameters for normalization
 raw_weights = airfoil_data[:, :-2]  # All CST coefficients (24 total)
 raw_params = airfoil_data[:, -2:]  # TE thickness and leading edge weight
+print(f"✓ Data shape: Weights {raw_weights.shape} | Params {raw_params.shape}")
 
 # Fit scaler on clean data
+print("✓ Fitting scaler to data...")
 scaler = AirfoilScaler()
 scaler.fit(raw_weights, raw_params)
-print(f"Max Weight Value: {np.max(scaler.w_max)}")
-print(f"Max Param Value: {np.max(scaler.p_max)}")
+
+print(f"  Weight range: ±{np.max(scaler.w_max):.6f}")
+print(f"  Param range:  ±{np.max(scaler.p_max):.6f}")
 
 # Normalize the data to [-1, 1] range
 normalized_data = scaler.transform(raw_weights, raw_params)
@@ -105,24 +111,27 @@ normalized_data = scaler.transform(raw_weights, raw_params)
 # Create TensorFlow dataset pipeline with shuffling and batching
 train_dataset = tf.data.Dataset.from_tensor_slices(normalized_data)
 train_dataset = train_dataset.shuffle(buffer_size=1024).batch(BATCH_SIZE)
-print(f"Dataset loaded and normalized: {len(normalized_data)} samples")
-print(
-    f"Data Range Check -> Min: {normalized_data.min():.2f}, Max: {normalized_data.max():.2f}"
-)
+print(f"\n✓ Dataset normalized: {len(normalized_data)} samples")
+print(f"  Batch size: {BATCH_SIZE} | Total batches: {len(normalized_data) // BATCH_SIZE}")
+print(f"  Data range: [{normalized_data.min():.3f}, {normalized_data.max():.3f}]")
 
 # ============================================================================
 # VALIDATION AIRFOILS PREPARATION
 # ============================================================================
 
 validation_dataset_path = Path(PROJECT_PATH) / "data" / "processed" / "val_kulfan_dataset_75.json"
-print("Loading dataset...")
+print("\n" + "="*70)
+print("LOADING VALIDATION DATASET")
+print("="*70)
 validation_airfoil_dataset = pd.read_json(validation_dataset_path)
+print(f"✓ Validation dataset loaded: {len(validation_airfoil_dataset)} samples")
 
 # Convert coordinate strings to numpy arrays
 validation_airfoil_dataset["coordinates"] = validation_airfoil_dataset["coordinates"].apply(lambda coords: np.array(coords))
 
 # Select first N airfoils for validation visualization during training
 validation_airfoils_sample = validation_airfoil_dataset.iloc[:AIRFOILS_TO_PLOT].reset_index(drop=True)
+print(f"✓ Selected {len(validation_airfoils_sample)} airfoils for validation visualization")
 # Create Airfoil objects for plotting reference
 validation_airfoils = [Airfoil(coordinates=af["coordinates"], name=af["airfoil_name"]) 
                        for af in validation_airfoils_sample.to_dict(orient="records")]
@@ -218,24 +227,70 @@ if not DEV:
         name=f"VAE_{time.strftime('%Y%m%d-%H%M%S')}",  # Unique run name with timestamp
         notes="Dense Arch + Linear Output + Sum Loss + Scaler"
     )
-
-# Verbosity level for training output
-VERBOSE = 1  # 0: silent, 1: print epoch info
+    print("\n✓ WandB initialized for experiment tracking")
+else:
+    print("\n⚠ Development mode enabled - WandB logging disabled")
 
 # ============================================================================
 # OUTPUT DIRECTORIES
 # ============================================================================
 # Create timestamped directories for model checkpoints and visualization images
-models_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S")
-images_path = Path(PROJECT_PATH) / "images" / "cstvae" / time.strftime("%Y%m%d-%H%M%S")
+models_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "weights"
+scaler_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "scaler"
+images_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "images"  
 os.makedirs(models_path, exist_ok=True)  # Create model save directory
+os.makedirs(scaler_path, exist_ok=True)  # Create scaler directory
 os.makedirs(images_path, exist_ok=True)  # Create visualization output directory
+print("\n" + "="*70)
+print("OUTPUT CONFIGURATION")
+print("="*70)
+print(f"✓ Model checkpoints: {models_path}")
+print(f"✓ Visualizations:    {images_path}")
+
+# ============================================================================
+# PREPARE FULL VALIDATION SET FOR METRICS
+# ============================================================================
+print("Preparing full validation tensor for metrics...")
+
+# Extract ALL validation vectors
+val_full_vectors = validation_airfoil_dataset["kulfan_parameters"].apply(
+  lambda p: np.concatenate([
+    p["lower_weights"],
+    p["upper_weights"],
+    [p["TE_thickness"]],
+    [p["leading_edge_weight"]]
+    ], axis=0)).to_list()
+
+# Convert to Tensor
+val_full_tensor = tf.convert_to_tensor(val_full_vectors, dtype=tf.float32)
+
+# Normalize (using the same scaler fitted on training data)
+val_full_normalized = scaler.transform(val_full_tensor[:, :24], val_full_tensor[:, 24:])
+
+print(f"✓ Full validation set ready: {val_full_normalized.shape}")
 
 # ============================================================================
 # MAIN TRAINING LOOP
 # ============================================================================
-print("Starting training...")
+print("\n" + "="*70)
+print("TRAINING CONFIGURATION")
+print("="*70)
+print(f"  Epochs:         {EPOCHS}")
+print(f"  Batch Size:     {BATCH_SIZE}")
+print(f"  Latent Dim:     {LATENT_DIM}")
+print(f"  Learning Rate:  {LEARNING_RATE}")
+print(f"  Warmup Epochs:  {WARMUP_EPOCHS}")
+print(f"  Target Beta:    {TARGET_BETA}")
+print(f"  Dev Mode:       {'ON (WandB disabled)' if DEV else 'OFF (WandB enabled)'}")
+print("\n" + "="*70)
+print("STARTING TRAINING")
+print("="*70 + "\n")
+
 start_time = time.time()
+
+# Save the Scaler 
+scaler_fn = f"scaler.pkl"
+joblib.dump(vae.scaler, os.path.join(scaler_path, "scaler.pkl"))
 
 for epoch in range(EPOCHS):
     # Initialize epoch metrics
@@ -251,7 +306,7 @@ for epoch in range(EPOCHS):
         BETA = TARGET_BETA
     
     # Train on all batches for this epoch
-    for x_batch in tqdm(train_dataset, desc=f"Epoch {epoch+1}/{EPOCHS}"):
+    for x_batch in tqdm(train_dataset, desc=f"  Batch", leave=False):
         # Run one training step and get losses
         total_loss, reco_loss, kl_loss = train_step(x_batch, BETA)
         
@@ -260,23 +315,41 @@ for epoch in range(EPOCHS):
         epoch_reco_loss.update_state(reco_loss)
         epoch_kl_loss.update_state(kl_loss)
 
-    # Log epoch results
+    # --- Calculate Validation MAE on the Full Dataset ---
+    # training=False ensures deterministic output (no sampling noise)
+    _, val_pred_w, val_pred_p = vae(val_full_normalized, training=False)
+    
+    # Reshape weights from (Batch, 2, 12) back to flat (Batch, 24)
+    val_pred_w_flat = tf.reshape(val_pred_w, [-1, 24])
+    
+    # Combine weights and params to match input shape (Batch, 26)
+    val_pred_combined = tf.concat([val_pred_w_flat, val_pred_p], axis=1)
+    
+    # Compute Mean Absolute Error
+    val_mae = tf.reduce_mean(tf.abs(val_full_normalized - val_pred_combined))
+
+    # ---------------------------------------------------------
+
+    # Log epoch results (Updated Print Statement)
     elapsed_time = time.time() - start_time
     
     if VERBOSE > 0:
-        print(f"Epoch {epoch+1}/{EPOCHS}, "
-              f"Time: {elapsed_time:.2f}s, "
-              f"Total Loss: {epoch_total_loss.result():.4f}, "
-              f"Reco Loss: {epoch_reco_loss.result():.4f}, "
-              f"KL Loss: {epoch_kl_loss.result():.4f}")
+        print(f"\n[Epoch {epoch+1:3d}/{EPOCHS}] "
+              f"Total: {epoch_total_loss.result():.5f} | "
+              f"Reco: {epoch_reco_loss.result():.5f} | "
+              f"KL: {epoch_kl_loss.result():.5f} | "
+              f"Val MAE: {val_mae:.5f} | "  # <--- Print MAE here
+              f"Beta: {BETA:.4f} | "
+              f"Time: {elapsed_time:7.1f}s")
     
-    # Log metrics to WandB for monitoring
+    # Log metrics to WandB 
     if not DEV:
-        wandb.log({'beta': BETA})
         wandb.log({
+            'beta': BETA,
             'epoch_total_loss': epoch_total_loss.result(),
             'epoch_reconstruction_loss': epoch_reco_loss.result(),
             'epoch_kl_loss': epoch_kl_loss.result(),
+            'val_mae': val_mae.numpy(), 
         })
 
     # Validation and visualization: run inference on validation set
@@ -302,9 +375,12 @@ for epoch in range(EPOCHS):
         reconstructed_airfoils.append(Airfoil(coordinates=coords))
 
     # Save visualization and model checkpoints periodically
-    if (epoch + 1) % 10 == 0:
-        # Optional: Save model weights at checkpoints
-        # vae.save_weights(f"{models_path}/model_epoch_{epoch+1}.weights.h5")
+    if (epoch + 1) % CHECKPOINT_EPOCHS == 0:
+        print(f"  └─ Saving visualization for epoch {epoch+1}...", end="")
+
+        # Save Weights 
+        weights_fn = f"vae_weights_epoch_{epoch+1}.weights.h5"
+        vae.save_weights(os.path.join(models_path, weights_fn))
 
         # Generate and save comparison plots of original vs reconstructed airfoils
         plot_original_and_reconstruction(
@@ -315,3 +391,4 @@ for epoch in range(EPOCHS):
             filename=f"reconstruction_epoch_{epoch+1}.png",
             show=False
         )
+        print(" ✓")
