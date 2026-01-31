@@ -6,7 +6,7 @@ class SamplingLayer(Layer):
     def __init__(self, **kwargs):
         super(SamplingLayer, self).__init__(**kwargs)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         """
         Args:
             inputs: A tuple of (z_mean, z_log_var)
@@ -16,6 +16,11 @@ class SamplingLayer(Layer):
             A 2D tensor of shape (batch_size, latent_dim) representing the sampled latent vector.
         """
         z_mean, z_log_var = inputs
+
+        # If not training, return mean only (Perfectly stable)
+        if not training:
+            return z_mean
+
         batch = tf.shape(z_mean)[0]
         dim = tf.shape(z_mean)[1]
         std_dev = tf.exp(0.5 * z_log_var)

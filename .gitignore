@@ -2,6 +2,8 @@
 *.gif
 *.keras
 wandb/
+images/ 
+models/
 
 .qodo
 *.zip
