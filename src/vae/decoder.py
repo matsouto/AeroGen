@@ -56,6 +56,9 @@ class Decoder(tf.keras.Model):
         
         if not self.use_modifications:
             parameters = tf.zeros_like(parameters)
+        
+        # Generate coordinates using CST Layer
+        # coords = self.cst_transform(weights, parameters)
             
         # Returning coords=None during training to save speed
         return None, weights, parameters

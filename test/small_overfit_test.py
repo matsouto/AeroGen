@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from src import vae
 from src.vae import CSTVariationalAutoencoder
-from src.utils import plot_original_and_reconstruction
+from src.plotting import plot_original_and_reconstruction
 from src.layers.airfoil_scaler import AirfoilScaler
 
 from src.airfoil import airfoil_modifications
