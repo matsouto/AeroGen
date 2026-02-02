@@ -64,6 +64,7 @@ HYPERPARAMETERS = {
 }
 
 PROJECT_PATH = "./"  # Project root directory
+TIMESTRING = time.strftime('%Y%m%d-%H%M%S')
 
 # ============================================================================
 # DATASET LOADING AND PREPARATION
@@ -84,8 +85,8 @@ airfoil_dataset["coordinates"] = airfoil_dataset["coordinates"].apply(lambda coo
 # Total: 26 parameters per airfoil
 airfoil_data = airfoil_dataset["kulfan_parameters"].apply(
   lambda p: np.concatenate([
-    p["lower_weights"],  # Lower surface CST weights
     p["upper_weights"],  # Upper surface CST weights
+    p["lower_weights"],  # Lower surface CST weights
     [p["TE_thickness"]],  # Trailing edge thickness
     [p["leading_edge_weight"]]  # Leading edge weight
     ], axis=0)).to_numpy()
@@ -139,8 +140,8 @@ validation_airfoils = [Airfoil(coordinates=af["coordinates"], name=af["airfoil_n
 # Extract Kulfan parameters from validation airfoils
 validation_input = validation_airfoils_sample["kulfan_parameters"].apply(
   lambda p: np.concatenate([
-    p["lower_weights"],  # Lower surface weights
     p["upper_weights"],  # Upper surface weights
+    p["lower_weights"],  # Lower surface weights
     [p["TE_thickness"]],  # Trailing edge thickness
     [p["leading_edge_weight"]]  # Leading edge weight
     ], axis=0)).to_list()
@@ -224,7 +225,7 @@ if not DEV:
     wandb.init(
         project="CSTVAE",
         config=HYPERPARAMETERS,
-        name=f"VAE_{time.strftime('%Y%m%d-%H%M%S')}",  # Unique run name with timestamp
+        name=f"VAE_{TIMESTRING}",  # Unique run name with timestamp
         notes="Dense Arch + Linear Output + Sum Loss + Scaler"
     )
     print("\n✓ WandB initialized for experiment tracking")
@@ -235,9 +236,9 @@ else:
 # OUTPUT DIRECTORIES
 # ============================================================================
 # Create timestamped directories for model checkpoints and visualization images
-models_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "weights"
-scaler_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "scaler"
-images_path = Path(PROJECT_PATH) / "models" / "cstvae" / time.strftime("%Y%m%d-%H%M%S") / "images"  
+models_path = Path(PROJECT_PATH) / "models" / "cstvae" / TIMESTRING / "weights"
+scaler_path = Path(PROJECT_PATH) / "models" / "cstvae" / TIMESTRING / "scaler"
+images_path = Path(PROJECT_PATH) / "models" / "cstvae" / TIMESTRING / "images"  
 os.makedirs(models_path, exist_ok=True)  # Create model save directory
 os.makedirs(scaler_path, exist_ok=True)  # Create scaler directory
 os.makedirs(images_path, exist_ok=True)  # Create visualization output directory
@@ -255,8 +256,8 @@ print("Preparing full validation tensor for metrics...")
 # Extract ALL validation vectors
 val_full_vectors = validation_airfoil_dataset["kulfan_parameters"].apply(
   lambda p: np.concatenate([
-    p["lower_weights"],
     p["upper_weights"],
+    p["lower_weights"],
     [p["TE_thickness"]],
     [p["leading_edge_weight"]]
     ], axis=0)).to_list()
@@ -268,6 +269,22 @@ val_full_tensor = tf.convert_to_tensor(val_full_vectors, dtype=tf.float32)
 val_full_normalized = scaler.transform(val_full_tensor[:, :24], val_full_tensor[:, 24:])
 
 print(f"✓ Full validation set ready: {val_full_normalized.shape}")
+
+# ============================================================================
+# PREPARE "GROUND TRUTH" GEOMETRY FOR METRICS
+# ============================================================================
+print("Generating 'Ground Truth' geometry for geometric metrics...")
+
+# Get PHYSICAL values (Denormalized/Real) from validation dataset
+true_weights_tensor = val_full_tensor[:, :24]
+true_params_tensor = val_full_tensor[:, 24:]
+
+# Generate real X,Y coordinates using the CST Layer
+# Resulting Shape: (N_Samples, N_Points, 2)
+true_weights_reshaped = tf.reshape(true_weights_tensor, [-1, 2, 12])
+true_geo_coords = vae.decoder.cst_transform(true_weights_reshaped, true_params_tensor)
+
+print(f"✓ Target geometry ready. Shape: {true_geo_coords.shape}")
 
 # ============================================================================
 # MAIN TRAINING LOOP
@@ -315,18 +332,34 @@ for epoch in range(EPOCHS):
         epoch_reco_loss.update_state(reco_loss)
         epoch_kl_loss.update_state(kl_loss)
 
-    # --- Calculate Validation MAE on the Full Dataset ---
-    # training=False ensures deterministic output (no sampling noise)
-    _, val_pred_w, val_pred_p = vae(val_full_normalized, training=False)
+    # --- VALIDATION METRICS CALCULATION (WEIGHTS + GEOMETRY) ---
     
-    # Reshape weights from (Batch, 2, 12) back to flat (Batch, 24)
-    val_pred_w_flat = tf.reshape(val_pred_w, [-1, 24])
+    # Inference (Weights MAE)
+    _, val_pred_w_norm, val_pred_p_norm = vae(val_full_normalized, training=False)
     
-    # Combine weights and params to match input shape (Batch, 26)
-    val_pred_combined = tf.concat([val_pred_w_flat, val_pred_p], axis=1)
-    
-    # Compute Mean Absolute Error
+    # Calculate Weights MAE (Normalized)
+    val_pred_w_flat = tf.reshape(val_pred_w_norm, [-1, 24])
+    val_pred_combined = tf.concat([val_pred_w_flat, val_pred_p_norm], axis=1)
     val_mae = tf.reduce_mean(tf.abs(val_full_normalized - val_pred_combined))
+
+    # Geometric Inference (Geometric MAE)
+    # We need to denormalize to generate physical geometry
+    pred_w_phys, pred_p_phys = vae.scaler.inverse_transform(
+        val_pred_w_norm.numpy(), 
+        val_pred_p_norm.numpy()
+    )
+    
+    # Convert back to Tensor to use in CST Layer
+    pred_w_phys_t = tf.convert_to_tensor(pred_w_phys, dtype=tf.float32)
+    pred_w_phys_reshaped = tf.reshape(pred_w_phys_t, [-1, 2, 12])
+
+    pred_p_phys_t = tf.convert_to_tensor(pred_p_phys, dtype=tf.float32)
+
+    # Generate predicted coordinates
+    pred_geo_coords = vae.decoder.cst_transform(pred_w_phys_reshaped, pred_p_phys_t)
+    # Calculate mean absolute difference between coordinates (only Y changes, X is fixed)
+    # Shape: (Batch, Points, 2). We are calculating point-to-point average distance.
+    val_geo_mae = tf.reduce_mean(tf.abs(true_geo_coords - pred_geo_coords))
 
     # ---------------------------------------------------------
 
@@ -338,7 +371,8 @@ for epoch in range(EPOCHS):
               f"Total: {epoch_total_loss.result():.5f} | "
               f"Reco: {epoch_reco_loss.result():.5f} | "
               f"KL: {epoch_kl_loss.result():.5f} | "
-              f"Val MAE: {val_mae:.5f} | "  # <--- Print MAE here
+              f"W-MAE: {val_mae:.5f} | "  
+              f"Geo-MAE: {val_geo_mae:.5f} | "
               f"Beta: {BETA:.4f} | "
               f"Time: {elapsed_time:7.1f}s")
     
@@ -349,7 +383,8 @@ for epoch in range(EPOCHS):
             'epoch_total_loss': epoch_total_loss.result(),
             'epoch_reconstruction_loss': epoch_reco_loss.result(),
             'epoch_kl_loss': epoch_kl_loss.result(),
-            'val_mae': val_mae.numpy(), 
+            'val_mae': val_mae.numpy(),
+            'val_geo_mae': val_geo_mae.numpy() 
         })
 
     # Validation and visualization: run inference on validation set

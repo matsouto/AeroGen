@@ -193,3 +193,67 @@ def plot_original_and_reconstruction(
             ax.annotate(f"{i+1}", xy=(pos[0], pos[1]), size=8)
 
     _finalize_plot(text_label, save_path, filename, dpi, show)
+
+def plot_airfoil_list(
+    airfoils: Union[List[np.ndarray], List[Airfoil]],
+    text_label: str = None,
+    figsize: tuple = (10, 10), 
+    scale: float = 0.8,
+    save_path: Union[Path, str] = None,
+    filename: str = "airfoil_list.png",
+    dpi: int = 100,
+    show: bool = True,
+    color: str = "red", 
+    linewidth: float = 1.5,
+    linestyle: str = "-",
+    scatter: bool = False,
+    dot_size: int = 20,
+    **kwargs,
+):
+    """
+    Plots a specific list of airfoils (e.g., invalid ones found during validation).
+    Accepts either a list of numpy arrays (Nx2) or a list of Airfoil objects.
+    """
+    
+    # Validação e Conversão de Entrada
+    if not airfoils:
+        print("Nenhum perfil para plotar.")
+        return
+
+    # Se for lista de arrays numpy, converte para Airfoil temporariamente ou usa direto
+    # A função _plot_single_shape espera coordenadas numpy, então vamos padronizar
+    coords_list = []
+    for item in airfoils:
+        if isinstance(item, Airfoil):
+            coords_list.append(item.coordinates)
+        elif isinstance(item, np.ndarray):
+            coords_list.append(item)
+        else:
+            raise ValueError("A lista deve conter objetos Airfoil ou numpy arrays.")
+
+    num_items = len(coords_list)
+    
+    # Cria o Grid usando sua função auxiliar existente
+    fig, ax = plt.subplots(figsize=figsize)
+    grid_points, grid_scale = _gen_grid(num_items)
+    final_scale = scale * grid_scale
+
+    for i, (pos, coords) in enumerate(zip(grid_points, coords_list)):
+        _plot_single_shape(
+            ax=ax,
+            coordinates=coords,
+            offset=pos,
+            scale=final_scale,
+            color=color,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            scatter=scatter,
+            dot_size=dot_size,
+            **kwargs,
+        )
+        
+        # Opcional: Adicionar índice para identificar qual falhou
+        ax.text(pos[0], pos[1] - (final_scale * 0.2), f"Idx: {i}", 
+                ha='center', fontsize=8, color='black')
+
+    _finalize_plot(text_label, save_path, filename, dpi, show)

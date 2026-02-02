@@ -57,7 +57,7 @@ class Decoder(tf.keras.Model):
         if not self.use_modifications:
             parameters = tf.zeros_like(parameters)
             
-        # We generally return coords=None during training to save speed
+        # Returning coords=None during training to save speed
         return None, weights, parameters
 
 if __name__ == "__main__":
