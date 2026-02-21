@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Layer
 from aerosandbox.geometry.airfoil import Airfoil
-from src.airfoil import airfoil_modifications
 import numpy as np
 
 

@@ -6,7 +6,7 @@ from . import Encoder
 from . import Decoder
 
 
-class CSTVariationalAutoencoder(tf.keras.Model):
+class CSTVariationalAutoencoder(tf.keras.Model): # type: ignore
     """Combines the new Encoder and Decoder."""
 
     def __init__(
@@ -44,7 +44,9 @@ if __name__ == "__main__":
     NPV = 12
     LATENT_DIM = 128
 
-    vae = CSTVariationalAutoencoder(npv=NPV, latent_dim=LATENT_DIM)
+    scaler = AirfoilScaler()
+
+    vae = CSTVariationalAutoencoder(scaler=scaler, npv=NPV, latent_dim=LATENT_DIM)
 
     # Create dummy input data
     dummy_weights = tf.random.normal([BATCH_SIZE, 2 * NPV])
@@ -55,8 +57,8 @@ if __name__ == "__main__":
     coords, weights, params = vae(vae_input)
 
     print("--- VAE ---")
-    print(f"Input shape: {vae_input.shape}")
-    print(f"Reconstructed Coordinates shape: {coords.shape}")
+    print(f"Input shape: {vae_input.shape}") # type: ignore
+    # print(f"Reconstructed Coordinates shape: {coords.shape}")
     print(f"Reconstructed Weights shape: {weights.shape}")
     print(f"Reconstructed Parameters shape: {params.shape}")
     print(f"Total losses (KL): {len(vae.losses)}")

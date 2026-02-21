@@ -1,8 +1,8 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, BatchNormalization, ReLU, Reshape
+from tensorflow.keras.layers import Dense, BatchNormalization, ReLU, Reshape # type: ignore
 from ..layers.cst_layer import CSTLayer 
 
-class Decoder(tf.keras.Model):
+class Decoder(tf.keras.Model): # type: ignore
     """
     A simple Dense Decoder.
     Directly maps latent code z -> CST coefficients.
@@ -61,7 +61,7 @@ class Decoder(tf.keras.Model):
         # coords = self.cst_transform(weights, parameters)
             
         # Returning coords=None during training to save speed
-        return None, weights, parameters
+        return weights, parameters
 
 if __name__ == "__main__":
     BATCH_SIZE = 4
@@ -75,12 +75,12 @@ if __name__ == "__main__":
     dummy_latent_vector = tf.random.normal([BATCH_SIZE, LATENT_DIM])
 
     # 3. Pass the latent vector through the decoder
-    coords, weights, params = decoder(dummy_latent_vector)
+    weights, params = decoder(dummy_latent_vector)
 
     # 4. Check the output shapes
     print("\n--- Decoder Test ---")
     print(f"Input shape (latent vector): {dummy_latent_vector.shape}")
-    print(f"Output Coordinates: {coords}")
+    # print(f"Output Coordinates: {coords}")
     print(f"Output Weights shape: {weights.shape}")
     print(f"Output Parameters shape: {params.shape}")
 
