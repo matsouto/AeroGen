@@ -1,15 +1,24 @@
 import tensorflow as tf
+from scipy.special import comb
 from tensorflow.keras.layers import Layer
 from aerosandbox.geometry.airfoil import Airfoil
 import numpy as np
 
 
 class CSTLayer(Layer):
-    def __init__(self, **kwargs):
+    def __init__(self, num_weights=12, **kwargs):
         super(CSTLayer, self).__init__(**kwargs)
         self.N1 = 0.5
         self.N2 = 1
         self.n_points_per_side = 75
+        self.num_weights = num_weights
+
+        # PRE-CALCULATION FOR ONNX COMPATIBILITY
+        # Calculates the binomial coefficients (Pascal's triangle) once on CPU
+        # ONNX will just see a static list of numbers instead of complex math.
+        n_order = self.num_weights - 1
+        combinations = [comb(n_order, i) for i in range(self.num_weights)]
+        self.K = tf.constant(combinations, dtype=tf.float32)
 
     def call(self, inputs, parameters):
         """
@@ -25,7 +34,7 @@ class CSTLayer(Layer):
         # Inputs is a 3D tensor: (batch_size, 2, num_weights)
         # For example, shape: (batch_size, 2, 12)
         batch_size = tf.shape(inputs)[0]
-        num_weights = tf.shape(inputs)[2]
+        num_weights = self.num_weights  # Use the initialized value
 
         # Split into lower and upper weights
         upper_weights = inputs[:, 0, :]  # Shape: (batch_size, num_weights)
@@ -45,7 +54,7 @@ class CSTLayer(Layer):
 
         def shape_function(w):
             # Shape function (Bernstein polynomials)
-            N = tf.cast(tf.shape(w)[1] - 1, dtype=tf.float32)  # num_weights - 1
+            N = tf.cast(self.num_weights - 1, dtype=tf.float32)  # Use consistent value
 
             # Compute binomial coefficients using TensorFlow
             k = tf.range(N + 1, dtype=tf.float32)  # Shape: (num_weights,)
