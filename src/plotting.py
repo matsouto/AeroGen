@@ -20,6 +20,7 @@ def _gen_grid(num_items: int, bounds: tuple = (0.0, 1.0)):
     scale_factor = 1.0 / points_per_axis
     return grid[:num_items], scale_factor
 
+
 def _plot_single_shape(
     ax,
     coordinates: np.ndarray,
@@ -53,6 +54,7 @@ def _plot_single_shape(
             **kwargs,
         )
 
+
 def _finalize_plot(
     text_label: str, save_path: Union[Path, str], filename: str, dpi: int, show: bool
 ):
@@ -65,7 +67,9 @@ def _finalize_plot(
     plt.tight_layout(rect=[0, 0.05, 1, 1])
 
     if text_label:
-        plt.figtext(0.5, 0.01, text_label, ha="center", fontsize=8, fontfamily='monospace')
+        plt.figtext(
+            0.5, 0.01, text_label, ha="center", fontsize=8, fontfamily="monospace"
+        )
 
     if save_path is not None and filename is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
@@ -79,6 +83,7 @@ def _finalize_plot(
 
 # --- Main Functions ---
 
+
 def save_latent_walk_gif(
     vae_model,
     start_point,
@@ -87,7 +92,7 @@ def save_latent_walk_gif(
     save_path: Union[Path, str] = None,
     num_steps: int = 40,
     fps: int = 20,
-    figsize: tuple = (8, 5), 
+    figsize: tuple = (8, 5),
     scale: float = 1.0,
     start_name: str = "Start",
     end_name: str = "End",
@@ -95,18 +100,20 @@ def save_latent_walk_gif(
 ):
     """
     Generate an animated GIF of latent space interpolation between two points.
-    
+
     Creates a smooth morphing animation showing the interpolation path
     with progress tracking and persistent start/end labels.
     """
-    
+
     # Extract and validate latent vectors
     z1 = start_point[0] if isinstance(start_point, (list, tuple)) else start_point
     z2 = end_point[0] if isinstance(end_point, (list, tuple)) else end_point
 
-    if len(z1.shape) == 1: z1 = tf.expand_dims(z1, 0)
-    if len(z2.shape) == 1: z2 = tf.expand_dims(z2, 0)
-    
+    if len(z1.shape) == 1:
+        z1 = tf.expand_dims(z1, 0)
+    if len(z2.shape) == 1:
+        z2 = tf.expand_dims(z2, 0)
+
     z1 = tf.cast(z1, tf.float32)
     z2 = tf.cast(z2, tf.float32)
 
@@ -116,16 +123,15 @@ def save_latent_walk_gif(
     for alpha in alphas:
         v = (1.0 - alpha) * z1 + alpha * z2
         interpolated_vectors.append(v)
-    
+
     interpolated_batch = tf.concat(interpolated_vectors, axis=0)
 
     # Decode and transform to physical airfoil coordinates
-    _, pred_weights_norm, pred_params_norm = vae_model.decoder(interpolated_batch)
+    pred_weights_norm, pred_params_norm = vae_model.decoder(interpolated_batch)
     pred_weights_flat = tf.reshape(pred_weights_norm, [-1, 24])
-    
+
     w_phys, p_phys = vae_model.scaler.inverse_transform(
-        pred_weights_flat.numpy(), 
-        pred_params_norm.numpy()
+        pred_weights_flat.numpy(), pred_params_norm.numpy()
     )
 
     w_phys_t = tf.reshape(tf.convert_to_tensor(w_phys, dtype=tf.float32), [-1, 2, 12])
@@ -137,32 +143,34 @@ def save_latent_walk_gif(
     all_y = morphing_coords[:, :, 1] * scale
     min_x, max_x = np.min(all_x), np.max(all_x)
     min_y, max_y = np.min(all_y), np.max(all_y)
-    
+
     pad_x = (max_x - min_x) * 0.15
     pad_y = (max_y - min_y) * 0.15
 
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Increase bottom margin to accommodate status text
-    plt.subplots_adjust(bottom=0.35) 
+    plt.subplots_adjust(bottom=0.35)
 
     ax.set_xlim(min_x - pad_x, max_x + pad_x)
     ax.set_ylim(min_y - pad_y, max_y + pad_y)
-    ax.set_aspect('equal')
-    ax.axis('off')
+    ax.set_aspect("equal")
+    ax.axis("off")
 
     cmap = plt.get_cmap("viridis")
-    line, = ax.plot([], [], linewidth=3.0)
-    
+    (line,) = ax.plot([], [], linewidth=3.0)
+
     # Position status text below plot area
     status_text = ax.text(
-        0.5, -0.30, "", 
-        transform=ax.transAxes, 
-        ha="center", 
-        fontsize=11, 
+        0.5,
+        -0.30,
+        "",
+        transform=ax.transAxes,
+        ha="center",
+        fontsize=11,
         color="black",
-        fontfamily='monospace',
-        linespacing=1.5 
+        fontfamily="monospace",
+        linespacing=1.5,
     )
 
     def init():
@@ -175,37 +183,38 @@ def save_latent_walk_gif(
         coords = morphing_coords[frame]
         adjusted_coords = coords * scale
         line.set_data(adjusted_coords[:, 0], adjusted_coords[:, 1])
-        
+
         # Update color based on interpolation progress
         progress = frame / (num_steps - 1)
         line.set_color(cmap(progress))
-        
+
         # Update status text with frame information
         pct = int(progress * 100)
         l1 = f"Interpolation Step {frame}/{num_steps-1} [{pct:>3}% ]"
         l2 = f"{start_name}  ->  {end_name}"
         label = f"{l1}\n{l2}"
-            
+
         status_text.set_text(label)
         return line, status_text
 
     # Create and save animation
     ani = animation.FuncAnimation(
-        fig, update, frames=num_steps, init_func=init, blit=True, interval=1000/fps
+        fig, update, frames=num_steps, init_func=init, blit=True, interval=1000 / fps
     )
-    
+
     if save_path:
         out_path = Path(save_path) / filename
     else:
         out_path = Path(filename)
-        
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"Generating GIF...")
-    ani.save(str(out_path), writer='pillow', fps=fps)
+    ani.save(str(out_path), writer="pillow", fps=fps)
     plt.close(fig)
-    
+
     print(f"GIF saved to: {out_path}")
+
 
 def plot_latent_walk(
     vae_model,
@@ -220,16 +229,16 @@ def plot_latent_walk(
     show: bool = True,
     start_name: str = "Start",
     end_name: str = "End",
-    colorbar: bool = True, 
+    colorbar: bool = True,
     **kwargs,
 ):
     """
     Plot linear interpolation in latent space as overlaid airfoils.
-    
+
     Displays all interpolated airfoils superimposed on the same axes
     with a continuous color gradient representing interpolation progress.
     """
-    
+
     # Remove 'title' kwarg if provided to avoid conflicts with Line2D
     if "title" in kwargs:
         # Update text_label above if title override is desired
@@ -239,29 +248,30 @@ def plot_latent_walk(
     z1 = start_point[0] if isinstance(start_point, (list, tuple)) else start_point
     z2 = end_point[0] if isinstance(end_point, (list, tuple)) else end_point
 
-    if len(z1.shape) == 1: z1 = tf.expand_dims(z1, 0)
-    if len(z2.shape) == 1: z2 = tf.expand_dims(z2, 0)
-    
+    if len(z1.shape) == 1:
+        z1 = tf.expand_dims(z1, 0)
+    if len(z2.shape) == 1:
+        z2 = tf.expand_dims(z2, 0)
+
     z1 = tf.cast(z1, tf.float32)
     z2 = tf.cast(z2, tf.float32)
 
     # Linear interpolation in latent space
     alphas = np.linspace(0, 1, num_steps)
     interpolated_vectors = []
-    
+
     for alpha in alphas:
         v = (1.0 - alpha) * z1 + alpha * z2
         interpolated_vectors.append(v)
-    
+
     interpolated_batch = tf.concat(interpolated_vectors, axis=0)
 
     # Decode and transform to physical airfoil coordinates
-    _, pred_weights_norm, pred_params_norm = vae_model.decoder(interpolated_batch)
+    pred_weights_norm, pred_params_norm = vae_model.decoder(interpolated_batch)
     pred_weights_flat = tf.reshape(pred_weights_norm, [-1, 24])
-    
+
     w_phys, p_phys = vae_model.scaler.inverse_transform(
-        pred_weights_flat.numpy(), 
-        pred_params_norm.numpy()
+        pred_weights_flat.numpy(), pred_params_norm.numpy()
     )
 
     w_phys_t = tf.reshape(tf.convert_to_tensor(w_phys, dtype=tf.float32), [-1, 2, 12])
@@ -270,15 +280,15 @@ def plot_latent_walk(
 
     # Create plot with all interpolated airfoils overlaid
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Use viridis for clear, high-contrast gradient
-    cmap = plt.get_cmap("viridis") 
+    cmap = plt.get_cmap("viridis")
     origin = np.array([0.0, 0.0])
 
     for i, coords in enumerate(morphing_coords):
         progress = i / (num_steps - 1)
         color = cmap(progress)
-        
+
         # Apply styling: emphasize endpoints, de-emphasize intermediate steps
         if i == 0:
             lw = 2.5
@@ -294,10 +304,10 @@ def plot_latent_walk(
             alpha = 1.0
         else:
             lw = 1.2
-            ls = "--" 
+            ls = "--"
             zorder = 1
             label = None
-            alpha = 0.6 
+            alpha = 0.6
 
         _plot_single_shape(
             ax=ax,
@@ -311,23 +321,24 @@ def plot_latent_walk(
             dot_size=0,
             alpha=alpha,
             label=label,
-            **kwargs  # Safe to use (title already removed)
+            **kwargs,  # Safe to use (title already removed)
         )
 
     # Add legend
     ax.legend(loc="upper right", framealpha=0.9)
-    
+
     # Add optional colorbar for interpolation progress
     if colorbar:
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
         cbar = plt.colorbar(sm, ax=ax, ticks=[0, 1])
         cbar.ax.set_yticklabels([start_name, end_name])
-        cbar.set_label('Morphing Progress')
+        cbar.set_label("Morphing Progress")
 
     ax.grid(True, alpha=0.3)
-    
+
     # Finalize
     _finalize_plot(text_label, save_path, filename, 100, show)
+
 
 def generate_and_plot_airfoils(
     generator: tf.keras.Model,
@@ -347,7 +358,7 @@ def generate_and_plot_airfoils(
 ):
     """
     Generate random airfoils and plot them in a grid layout.
-    
+
     Samples random latent vectors, generates airfoils via the generator model,
     and creates a visualization grid.
     """
@@ -380,6 +391,7 @@ def generate_and_plot_airfoils(
 
     _finalize_plot(text_label, save_path, filename, dpi, show)
 
+
 def plot_original_and_reconstruction(
     originals: List[Airfoil],
     reconstructions: List[Airfoil],
@@ -402,7 +414,7 @@ def plot_original_and_reconstruction(
 ):
     """
     Compare original and reconstructed airfoils side-by-side in a grid.
-    
+
     Displays original airfoils (dashed) overlaid with reconstructions (solid)
     for easy visual comparison of reconstruction quality.
     """
@@ -447,16 +459,17 @@ def plot_original_and_reconstruction(
 
     _finalize_plot(text_label, save_path, filename, dpi, show)
 
+
 def plot_airfoil_list(
     airfoils: Union[List[np.ndarray], List[Airfoil]],
     text_label: str = None,
-    figsize: tuple = (10, 10), 
+    figsize: tuple = (10, 10),
     scale: float = 0.8,
     save_path: Union[Path, str] = None,
     filename: str = "airfoil_list.png",
     dpi: int = 100,
     show: bool = True,
-    color: str = "red", 
+    color: str = "red",
     linewidth: float = 1.5,
     linestyle: str = "-",
     scatter: bool = False,
@@ -465,11 +478,11 @@ def plot_airfoil_list(
 ):
     """
     Plot a collection of airfoils in a grid layout.
-    
+
     Accepts either numpy coordinate arrays (Nx2) or Airfoil objects.
     Useful for visualizing invalid airfoils or other specific subsets.
     """
-    
+
     # Validate and convert input
     if not airfoils:
         print("No airfoils to plot.")
@@ -487,7 +500,7 @@ def plot_airfoil_list(
             raise ValueError("Input list must contain Airfoil objects or numpy arrays.")
 
     num_items = len(coords_list)
-    
+
     # Create grid layout using helper function
     fig, ax = plt.subplots(figsize=figsize)
     grid_points, grid_scale = _gen_grid(num_items)
@@ -506,9 +519,16 @@ def plot_airfoil_list(
             dot_size=dot_size,
             **kwargs,
         )
-        
+
         # Add index label for identification
-        ax.text(pos[0], pos[1] - (final_scale * 0.2), f"Idx: {i}", 
-                ha='center', fontsize=8, color='black', fontfamily='monospace')
+        ax.text(
+            pos[0],
+            pos[1] - (final_scale * 0.2),
+            f"Idx: {i}",
+            ha="center",
+            fontsize=8,
+            color="black",
+            fontfamily="monospace",
+        )
 
     _finalize_plot(text_label, save_path, filename, dpi, show)
